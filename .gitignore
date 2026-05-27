@@ -3,3 +3,7 @@ dist/
 .env
 .env.local
 *.local
+
+# Runtime work order data (created on the shop floor)
+work-orders/*
+!work-orders/.gitkeep

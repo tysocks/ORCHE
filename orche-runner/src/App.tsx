@@ -1,288 +1,328 @@
 import './App.css'
-import { useEffect, useMemo, useState } from 'react'
-import matter from 'gray-matter'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AppShell } from './components/AppShell'
+import { HomeView } from './components/HomeView'
+import { OperationRunner } from './components/OperationRunner'
+import { WorkOrderView } from './components/WorkOrderView'
+import {
+  WorkOrderSummaryView,
+  type WorkOrderSummaryData,
+} from './components/WorkOrderSummaryView'
+import { useUserSettings } from './context/UserSettingsContext'
+import { deriveBlockedOps, deriveOperationStatus } from './lib/events'
+import type {
+  ParsedOperation,
+  ProcessEvent,
+  RoutingRow,
+  WorkOrderListItem,
+  WorkOrderOperation,
+} from './lib/types'
 
-type TemplateListItem = {
+type Screen = 'home' | 'work-order' | 'summary'
+
+type WorkOrderData = {
   id: string
-  relPath: string
-  displayName: string
+  partNumber?: string
+  serialNumber?: string
+  routing?: string
+  status?: string
+  startDate?: string | null
+  endDate?: string | null
+  estimatedTimeMinutes?: number | null
+  actualTimeMinutes?: number | null
+  operations: Array<RoutingRow & { templatePath: string | null }>
 }
 
-type OrcheInput =
-  | {
-      id: string
-      type: 'text'
-      label: string
-      required?: boolean
-    }
-  | {
-      id: string
-      type: 'textarea'
-      label: string
-      required?: boolean
-    }
-  | {
-      id: string
-      type: 'checkbox'
-      label: string
-      required?: boolean
-    }
-
-function safeJsonParse<T>(raw: string): { ok: true; value: T } | { ok: false } {
-  try {
-    return { ok: true, value: JSON.parse(raw) as T }
-  } catch {
-    return { ok: false }
-  }
+type ActiveOperation = WorkOrderOperation & {
+  templatePath: string
 }
 
-function App() {
-  const [templates, setTemplates] = useState<TemplateListItem[]>([])
-  const [selected, setSelected] = useState<TemplateListItem | null>(null)
-  const [templateContent, setTemplateContent] = useState<string>('')
-  const [workOrderId, setWorkOrderId] = useState<string>('WO-LOCAL-DEMO')
-  const [inputs, setInputs] = useState<Record<string, unknown>>({})
-  const [eventsCount, setEventsCount] = useState<number>(0)
+export default function App() {
+  const { settings, isComplete: userSettingsComplete } = useUserSettings()
+  const [screen, setScreen] = useState<Screen>('home')
+  const [workOrderList, setWorkOrderList] = useState<WorkOrderListItem[]>([])
+  const [listLoading, setListLoading] = useState(true)
+  const [workOrderId, setWorkOrderId] = useState<string | null>(null)
+  const [workOrder, setWorkOrder] = useState<WorkOrderData | null>(null)
+  const [summary, setSummary] = useState<WorkOrderSummaryData | null>(null)
+  const [woLoading, setWoLoading] = useState(false)
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [events, setEvents] = useState<ProcessEvent[]>([])
+  const [activeOp, setActiveOp] = useState<ActiveOperation | null>(null)
+  const [activeParsed, setActiveParsed] = useState<ParsedOperation | null>(null)
+  const [activeTemplatePath, setActiveTemplatePath] = useState<string | null>(null)
+  const [openingOp, setOpeningOp] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/templates')
+  const refreshWorkOrderList = useCallback(() => {
+    setListLoading(true)
+    return fetch('/api/work-orders')
       .then((r) => r.json())
       .then((data) => {
-        if (cancelled) return
-        const list = (data?.templates ?? []) as TemplateListItem[]
-        setTemplates(list)
-        setSelected((prev) => prev ?? list[0] ?? null)
+        const rows = Array.isArray(data?.workOrders) ? data.workOrders : []
+        setWorkOrderList(
+          rows
+            .map((row: unknown) => {
+              if (typeof row === 'string') {
+                return {
+                  id: row,
+                  partNumber: '',
+                  serialNumber: '',
+                  routing: '',
+                  status: 'Not Started',
+                } satisfies WorkOrderListItem
+              }
+              if (!row || typeof row !== 'object') return null
+              const r = row as Record<string, unknown>
+              const id = String(r.id ?? '').trim()
+              if (!id) return null
+              return {
+                id,
+                partNumber: String(r.partNumber ?? ''),
+                serialNumber: String(r.serialNumber ?? ''),
+                routing: String(r.routing ?? ''),
+                status: String(r.status ?? 'Not Started'),
+              } satisfies WorkOrderListItem
+            })
+            .filter((row: WorkOrderListItem | null): row is WorkOrderListItem => row != null),
+        )
       })
-      .catch(() => {
-        // ignore for MVP
-      })
-    return () => {
-      cancelled = true
-    }
+      .catch(() => setWorkOrderList([]))
+      .finally(() => setListLoading(false))
   }, [])
 
   useEffect(() => {
-    if (!selected) return
-    let cancelled = false
-    fetch(`/api/template?path=${encodeURIComponent(selected.relPath)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return
-        setTemplateContent(String(data?.content ?? ''))
-      })
-      .catch(() => {
-        if (cancelled) return
-        setTemplateContent('')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [selected])
+    refreshWorkOrderList()
+  }, [refreshWorkOrderList])
 
   useEffect(() => {
-    let cancelled = false
-    fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/events`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return
-        setEventsCount(Array.isArray(data?.events) ? data.events.length : 0)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setEventsCount(0)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [workOrderId])
+    if (screen !== 'home') return
+    const id = setInterval(() => {
+      refreshWorkOrderList()
+    }, 5000)
+    return () => clearInterval(id)
+  }, [screen, refreshWorkOrderList])
 
-  const parsed = useMemo(() => {
-    const res = matter(templateContent || '')
-    return {
-      frontmatter: res.data as Record<string, unknown>,
-      markdown: res.content,
-    }
-  }, [templateContent])
+  const refreshEvents = useCallback(async (id: string) => {
+    const r = await fetch(`/api/work-orders/${encodeURIComponent(id)}/events`)
+    const data = await r.json()
+    setEvents(Array.isArray(data?.events) ? data.events : [])
+  }, [])
 
-  const opId = String(parsed.frontmatter?.op_id ?? selected?.id ?? 'OP-UNKNOWN')
+  const loadWorkOrder = useCallback(
+    async (id: string) => {
+      setLoadError(null)
+      setWoLoading(true)
+      try {
+        const [woRes] = await Promise.all([
+          fetch(`/api/work-orders/${encodeURIComponent(id)}`),
+          refreshEvents(id),
+        ])
+        if (!woRes.ok) {
+          setWorkOrder(null)
+          setLoadError('Work order not found')
+          return false
+        }
+        const wo = (await woRes.json()) as WorkOrderData
+        setWorkOrder(wo)
+        setWorkOrderId(id)
+        return true
+      } catch {
+        setLoadError('Failed to load work order')
+        return false
+      } finally {
+        setWoLoading(false)
+      }
+    },
+    [refreshEvents],
+  )
+
+  async function openWorkOrder(id: string) {
+    if (!userSettingsComplete) return
+    const ok = await loadWorkOrder(id)
+    if (ok) setScreen('work-order')
+  }
+
+  async function loadSummary(id: string) {
+    setSummaryLoading(true)
+    setLoadError(null)
+    try {
+      const r = await fetch(`/api/work-orders/${encodeURIComponent(id)}/summary`)
+      if (!r.ok) {
+        setLoadError('Failed to load summary')
+        return
+      }
+      const data = await r.json()
+      setSummary(data.summary as WorkOrderSummaryData)
+      setScreen('summary')
+      await loadWorkOrder(id)
+    } catch {
+      setLoadError('Failed to load summary')
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  function goHome() {
+    setScreen('home')
+    setWorkOrderId(null)
+    setWorkOrder(null)
+    setSummary(null)
+    setEvents([])
+    setLoadError(null)
+    setActiveOp(null)
+    setActiveParsed(null)
+    setActiveTemplatePath(null)
+  }
+
+  function backFromSummary() {
+    setSummary(null)
+    setScreen('work-order')
+  }
+
+  const operationsWithStatus: WorkOrderOperation[] = useMemo(() => {
+    if (!workOrder) return []
+
+    const completedOpNos = new Set<number>()
+    const ops = workOrder.operations
+
+    for (const op of ops) {
+      const status = deriveOperationStatus(events, op.operationNo, op.operationId)
+      if (status === 'completed') completedOpNos.add(op.operationNo)
+    }
+
+    const blocked = deriveBlockedOps(ops, completedOpNos)
+
+    return ops.map((op) => {
+      let status: WorkOrderOperation['status'] = deriveOperationStatus(
+        events,
+        op.operationNo,
+        op.operationId,
+      )
+      if (blocked.has(op.operationNo)) status = 'blocked'
+      return { ...op, status }
+    })
+  }, [workOrder, events])
+
+  async function openOperation(op: WorkOrderOperation) {
+    if (!userSettingsComplete || !op.templatePath || !workOrderId) return
+    setOpeningOp(true)
+    setLoadError(null)
+    try {
+      const r = await fetch(`/api/operation?path=${encodeURIComponent(op.templatePath)}`)
+      if (!r.ok) {
+        setLoadError('Failed to load operation')
+        return
+      }
+      const data = await r.json()
+      await refreshEvents(workOrderId)
+      setActiveParsed(data.operation as ParsedOperation)
+      setActiveTemplatePath(op.templatePath)
+      setActiveOp({ ...op, templatePath: op.templatePath })
+    } catch {
+      setLoadError('Failed to load operation')
+    } finally {
+      setOpeningOp(false)
+    }
+  }
+
+  function closeOperation() {
+    setActiveOp(null)
+    setActiveParsed(null)
+    setActiveTemplatePath(null)
+    if (workOrderId) {
+      refreshEvents(workOrderId)
+      loadWorkOrder(workOrderId)
+    }
+  }
 
   async function appendEvent(event: object) {
+    if (!activeOp || !workOrderId || !userSettingsComplete) return
     await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/events`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         workOrderId,
-        opId,
+        operationNo: activeOp.operationNo,
+        opId: activeOp.operationId,
+        operatorName: settings.operatorName,
+        workShift: settings.workShift,
         ...event,
       }),
     })
-    const refreshed = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/events`).then((r) =>
-      r.json(),
+  }
+
+  if (activeOp && activeParsed && activeTemplatePath && workOrderId) {
+    return (
+      <OperationRunner
+        operation={activeParsed}
+        templatePath={activeTemplatePath}
+        operationNo={activeOp.operationNo}
+        operationName={activeOp.operationName}
+        workOrderId={workOrderId}
+        events={events}
+        onHome={goHome}
+        onBack={closeOperation}
+        onEvent={appendEvent}
+        onRefreshEvents={() => refreshEvents(workOrderId)}
+      />
     )
-    setEventsCount(Array.isArray(refreshed?.events) ? refreshed.events.length : 0)
+  }
+
+  if (screen === 'summary' && summary) {
+    return (
+      <AppShell onHome={goHome}>
+        <WorkOrderSummaryView summary={summary} onBack={backFromSummary} />
+      </AppShell>
+    )
+  }
+
+  if (screen === 'home') {
+    return (
+      <AppShell>
+        <HomeView
+          workOrders={workOrderList}
+          loading={listLoading}
+          onOpen={openWorkOrder}
+          onCreated={openWorkOrder}
+          onRefreshList={refreshWorkOrderList}
+        />
+        {loadError ? <div className="errorBanner">{loadError}</div> : null}
+      </AppShell>
+    )
   }
 
   return (
-    <>
-      <div className="appShell">
-        <header className="topBar">
-          <div className="brand">
-            <div className="brandMark">ORCHE</div>
-            <div className="brandSub">Work instruction runner (local MVP)</div>
-          </div>
+    <AppShell onHome={goHome}>
+      {loadError ? <div className="errorBanner">{loadError}</div> : null}
+      {openingOp || summaryLoading ? (
+        <div className="loadingOverlay">
+          {summaryLoading ? 'Loading summary…' : 'Opening operation…'}
+        </div>
+      ) : null}
 
-          <div className="topControls">
-            <label className="field">
-              <div className="fieldLabel">Work order</div>
-              <input
-                className="input"
-                value={workOrderId}
-                onChange={(e) => setWorkOrderId(e.target.value)}
-                placeholder="WO-..."
-              />
-            </label>
-
-            <label className="field">
-              <div className="fieldLabel">Template</div>
-              <select
-                className="input"
-                value={selected?.relPath ?? ''}
-                onChange={(e) => {
-                  const next = templates.find((t) => t.relPath === e.target.value) ?? null
-                  setSelected(next)
-                  setInputs({})
-                }}
-              >
-                {templates.map((t) => (
-                  <option key={t.relPath} value={t.relPath}>
-                    {t.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="pill">Events: {eventsCount}</div>
-          </div>
-        </header>
-
-        <main className="main">
-          <section className="card">
-            <div className="cardHeader">
-              <div>
-                <div className="cardTitle">{String(parsed.frontmatter?.default_title ?? selected?.displayName ?? 'Operation')}</div>
-                <div className="cardMeta">
-                  <span className="mono">{opId}</span>
-                  <span className="dot">•</span>
-                  <span className="muted">
-                    Est. {String(parsed.frontmatter?.estimated_minutes ?? '—')} min
-                  </span>
-                </div>
-              </div>
-
-              <button
-                className="buttonPrimary"
-                type="button"
-                onClick={() =>
-                  appendEvent({
-                    kind: 'step_completed',
-                    stepId: 'operation_complete',
-                    inputs,
-                  })
-                }
-              >
-                Complete operation
-              </button>
-            </div>
-
-            <div className="doc">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  code(props) {
-                    const { className, children } = props
-                    const match = /language-(\S+)/.exec(className || '')
-                    const lang = match?.[1] ?? ''
-
-                    if (lang === 'orche-input') {
-                      const raw = String(children ?? '').trim()
-                      const parsed = safeJsonParse<OrcheInput>(raw)
-                      if (!parsed.ok) {
-                        return <pre className="codeBlock">Invalid orche-input JSON</pre>
-                      }
-                      const def = parsed.value
-                      const value = inputs[def.id]
-                      const required = Boolean(def.required)
-
-                      return (
-                        <div className="orcheInput">
-                          <div className="orcheLabel">
-                            {def.label} {required ? <span className="req">*</span> : null}
-                          </div>
-
-                          {def.type === 'text' ? (
-                            <input
-                              className="input"
-                              value={typeof value === 'string' ? value : ''}
-                              onChange={async (e) => {
-                                const v = e.target.value
-                                setInputs((prev) => ({ ...prev, [def.id]: v }))
-                                await appendEvent({ kind: 'input_changed', inputId: def.id, value: v })
-                              }}
-                            />
-                          ) : def.type === 'textarea' ? (
-                            <textarea
-                              className="input textarea"
-                              value={typeof value === 'string' ? value : ''}
-                              onChange={async (e) => {
-                                const v = e.target.value
-                                setInputs((prev) => ({ ...prev, [def.id]: v }))
-                                await appendEvent({ kind: 'input_changed', inputId: def.id, value: v })
-                              }}
-                            />
-                          ) : (
-                            <label className="checkboxRow">
-                              <input
-                                type="checkbox"
-                                checked={value === true}
-                                onChange={async (e) => {
-                                  const v = e.target.checked
-                                  setInputs((prev) => ({ ...prev, [def.id]: v }))
-                                  await appendEvent({ kind: 'input_changed', inputId: def.id, value: v })
-                                }}
-                              />
-                              <span className="muted">Mark complete</span>
-                            </label>
-                          )}
-                        </div>
-                      )
-                    }
-
-                    // render normal inline code
-                    return <code className={className}>{children}</code>
-                  },
-                }}
-              >
-                {parsed.markdown}
-              </ReactMarkdown>
-            </div>
-          </section>
-
-          <section className="card">
-            <div className="cardHeader">
-              <div>
-                <div className="cardTitle">Current captured inputs</div>
-                <div className="cardMeta muted">These are also written as events (append-only).</div>
-              </div>
-            </div>
-            <pre className="codeBlock">{JSON.stringify(inputs, null, 2)}</pre>
-          </section>
-        </main>
-      </div>
-    </>
+      {woLoading && !workOrder ? (
+        <div className="muted">Loading work order…</div>
+      ) : workOrder && workOrderId ? (
+        <WorkOrderView
+          workOrderId={workOrder.id}
+          partNumber={workOrder.partNumber}
+          serialNumber={workOrder.serialNumber}
+          routing={workOrder.routing}
+          status={workOrder.status}
+          operations={operationsWithStatus}
+          actionsEnabled={userSettingsComplete}
+          onOpenSummary={() => loadSummary(workOrderId)}
+          onSelectOperation={openOperation}
+        />
+      ) : (
+        <div>
+          <button type="button" className="buttonGhost" onClick={goHome}>
+            ← Back
+          </button>
+          <p className="muted">{loadError ?? 'Work order unavailable.'}</p>
+        </div>
+      )}
+    </AppShell>
   )
 }
-
-export default App
