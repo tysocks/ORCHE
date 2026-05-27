@@ -1,0 +1,208 @@
+.appShell {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topBar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.brand {
+  text-align: left;
+}
+
+.brandMark {
+  font-family: var(--heading);
+  letter-spacing: -0.6px;
+  color: var(--text-h);
+  font-weight: 650;
+  font-size: 18px;
+}
+
+.brandSub {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.topControls {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr;
+  gap: 16px;
+  padding: 16px;
+  text-align: left;
+  align-items: start;
+}
+
+@media (max-width: 980px) {
+  .main {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--bg) 92%, transparent);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cardTitle {
+  font-family: var(--heading);
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.cardMeta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.dot {
+  opacity: 0.5;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.muted {
+  opacity: 0.8;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.input {
+  font: 14px/135% var(--sans);
+  color: var(--text-h);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.pill {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--social-bg);
+}
+
+.buttonPrimary {
+  cursor: pointer;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: 14px/1 var(--sans);
+  transition: transform 0.08s ease, box-shadow 0.2s ease;
+}
+
+.buttonPrimary:active {
+  transform: translateY(1px);
+}
+
+.doc {
+  padding: 14px;
+}
+
+.doc h1,
+.doc h2,
+.doc h3 {
+  margin: 14px 0 8px;
+}
+
+.doc p {
+  margin: 10px 0;
+}
+
+.codeBlock {
+  margin: 0;
+  padding: 12px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 150%;
+  color: var(--text-h);
+}
+
+.orcheInput {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: color-mix(in oklab, var(--bg) 80%, var(--code-bg));
+  margin: 10px 0 14px;
+}
+
+.orcheLabel {
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: var(--text-h);
+  font-weight: 550;
+}
+
+.req {
+  color: var(--accent);
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
