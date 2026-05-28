@@ -1,12 +1,23 @@
 import { useMemo, useRef, useState } from 'react'
 import { useUserSettings } from '../context/UserSettingsContext'
-import type { ParsedOperation, ProcessEvent } from '../lib/types'
+import {
+  buildSectionInputSnapshot,
+  sectionCanComplete,
+} from '../lib/checklist'
+import type { ChecklistSection, ParsedOperation, ProcessEvent } from '../lib/types'
 import { deriveCompletedSteps, deriveInputValues, deriveOperationStatus, deriveStepMeta } from '../lib/events'
-import { InputField, stepInputsValid } from './InputField'
-import { MarkdownContent } from './MarkdownContent'
+import { stepInputsValid } from './InputField'
+import { ChecklistOperationBody } from './ChecklistOperationBody'
+import { InstructionOperationBody } from './InstructionOperationBody'
+import { operationTypeLabel } from '../lib/operationTypes'
 import { AppShell } from './AppShell'
 import { OpenProfileLink } from './OpenProfileLink'
-import { StepToolbar } from './StepToolbar'
+import { collectToolsForOperation } from '../lib/tools'
+import { MenuDropdown } from './MenuDropdown'
+import { SidePanel } from './SidePanel'
+import { OperationActionLog } from './OperationActionLog'
+import { OperationNotesPanel } from './panels/OperationNotesPanel'
+import { RequiredToolsTable } from './RequiredToolsTable'
 
 function IconCheck() {
   return (
@@ -28,15 +39,7 @@ function IconWrench() {
   )
 }
 
-function IconDots() {
-  return (
-    <svg className="stepToolIcon" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <circle cx="5" cy="12" r="1.8" />
-      <circle cx="12" cy="12" r="1.8" />
-      <circle cx="19" cy="12" r="1.8" />
-    </svg>
-  )
-}
+type OpPanel = 'action-log' | 'notes' | null
 
 type Props = {
   operation: ParsedOperation
@@ -49,6 +52,14 @@ type Props = {
   onBack: () => void
   onEvent: (event: object) => Promise<void>
   onRefreshEvents: () => Promise<void>
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a === 'object' && a != null && typeof b === 'object' && b != null) {
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+  return false
 }
 
 export function OperationRunner({
@@ -66,7 +77,7 @@ export function OperationRunner({
   const { settings, isComplete } = useUserSettings()
   const opId = operation.opId
   const [toolsOpen, setToolsOpen] = useState(false)
-  const [dataOpen, setDataOpen] = useState(false)
+  const [panel, setPanel] = useState<OpPanel>(null)
   const [localValues, setLocalValues] = useState<Record<string, unknown>>({})
   const stepRefs = useRef<Record<string, HTMLElement | null>>({})
 
@@ -95,9 +106,37 @@ export function OperationRunner({
   )
   const opIsCompleted = opStatus === 'completed'
 
-  async function handleInputChange(inputId: string, value: unknown) {
+  const toolEntries = useMemo(
+    () => collectToolsForOperation(operation, values),
+    [operation, values],
+  )
+
+  const noteEntries = useMemo(() => {
+    if (operation.operationType === 'checklist') {
+      return (operation.checklistSections ?? []).flatMap((sec) =>
+        sec.items.map((item) => ({
+          id: item.id,
+          title: `${item.number} ${item.title}`,
+          note: stepMeta[item.id]?.note ?? '',
+        })),
+      )
+    }
+    return operation.steps.map((s) => ({
+      id: s.id,
+      title: s.title,
+      note: stepMeta[s.id]?.note ?? '',
+    }))
+  }, [operation, stepMeta])
+
+  function handleInputChange(inputId: string, value: unknown) {
     if (!isComplete) return
     setLocalValues((prev) => ({ ...prev, [inputId]: value }))
+  }
+
+  async function commitInputChange(inputId: string, value: unknown) {
+    if (!isComplete) return
+    const lastPersisted = persistedValues[inputId]
+    if (valuesEqual(lastPersisted, value)) return
     await onEvent({ kind: 'input_changed', inputId, value })
   }
 
@@ -106,11 +145,12 @@ export function OperationRunner({
     stepInputs: ParsedOperation['steps'][0]['inputs'],
   ) {
     if (!isComplete) return
+    if (!stepInputsValid(stepInputs, values)) return
+
     const snapshot: Record<string, unknown> = {}
     for (const def of stepInputs) {
-      if (def.id in values) snapshot[def.id] = values[def.id]
+      snapshot[def.id] = values[def.id]
     }
-    if (!stepInputsValid(stepInputs, values)) return
 
     await onEvent({
       kind: 'step_completed',
@@ -119,6 +159,27 @@ export function OperationRunner({
       completedBy: settings.operatorName,
     })
     await onRefreshEvents()
+  }
+
+  async function completeChecklistSection(section: ChecklistSection) {
+    if (!isComplete) return
+    if (!sectionCanComplete(section, values)) return
+
+    await onEvent({
+      kind: 'step_completed',
+      stepId: section.id,
+      inputs: buildSectionInputSnapshot(section, values),
+      completedBy: settings.operatorName,
+    })
+    await onRefreshEvents()
+  }
+
+  async function toggleChecklistSection(section: ChecklistSection) {
+    if (stepMeta[section.id]?.completed) {
+      await uncompleteStep(section.id)
+    } else {
+      await completeChecklistSection(section)
+    }
   }
 
   async function uncompleteStep(stepId: string) {
@@ -167,17 +228,13 @@ export function OperationRunner({
       <div className="operationHeaderMeta">
         <span className="mono">{opId}</span>
         <span className="dot">•</span>
+        <span className={`opTypePill opTypePill_${operation.operationType}`}>
+          {operationTypeLabel(operation.operationType)}
+        </span>
+        <span className="dot">•</span>
         <span className="muted">
           {completedCount}/{operation.steps.length} steps
         </span>
-        {isComplete ? (
-          <>
-            <span className="dot">•</span>
-            <span className="muted">
-              {settings.operatorName} ({settings.workShift})
-            </span>
-          </>
-        ) : null}
         {operation.estimatedMinutes != null ? (
           <>
             <span className="dot">•</span>
@@ -237,153 +294,82 @@ export function OperationRunner({
             <IconWrench />
           </button>
 
-          <button
-            type="button"
-            className="stepToolBtn stepToolSquare"
-            onClick={() => setDataOpen(true)}
-            title="Operation menu"
-            aria-label="Operation menu"
-          >
-            <IconDots />
-          </button>
+          <MenuDropdown
+            ariaLabel="Operation menu"
+            items={[
+              { id: 'action-log', label: 'Action Log', onClick: () => setPanel('action-log') },
+              { id: 'notes', label: 'Notes', onClick: () => setPanel('notes') },
+            ]}
+          />
         </div>
       }
     >
       <div className="operationRunnerInner">
         {toolsOpen ? (
-          <>
-            <button
-              type="button"
-              className="modalScrim"
-              onClick={() => setToolsOpen(false)}
-              aria-label="Close tools"
-            />
-            <div className="modalCard" role="dialog" aria-label="Required tools">
-              <div className="modalHead">
-                <div className="modalTitle">Required tools</div>
-                <button type="button" className="iconBtn" onClick={() => setToolsOpen(false)} aria-label="Close">
-                  ×
-                </button>
-              </div>
-              <div className="modalBody">
-                {operation.requiredTools && operation.requiredTools.length > 0 ? (
-                  <ul className="modalList">
-                    {operation.requiredTools.map((t) => (
-                      <li key={t}>{t}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="muted">No required tools listed for this operation.</div>
-                )}
-              </div>
-            </div>
-          </>
+          <SidePanel title="Required tools" onClose={() => setToolsOpen(false)}>
+            <RequiredToolsTable tools={toolEntries} />
+          </SidePanel>
         ) : null}
 
-        {dataOpen ? (
-          <>
-            <button
-              type="button"
-              className="modalScrim"
-              onClick={() => setDataOpen(false)}
-              aria-label="Close menu"
+        {panel === 'action-log' ? (
+          <SidePanel title="Action log" onClose={() => setPanel(null)}>
+            <OperationActionLog
+              events={events}
+              operationNo={operationNo}
+              opId={opId}
+              operation={operation}
             />
-            <div className="modalCard" role="dialog" aria-label="Operation menu">
-              <div className="modalHead">
-                <div className="modalTitle">Operation data</div>
-                <button type="button" className="iconBtn" onClick={() => setDataOpen(false)} aria-label="Close">
-                  ×
-                </button>
-              </div>
-              <div className="modalBody">
-                {Object.entries(stepMeta)
-                  .filter(([, m]) => Boolean(m.note && m.note.trim()))
-                  .length > 0 ? (
-                  <div className="opNotesList">
-                    {operation.steps.map((s) => {
-                      const n = stepMeta[s.id]?.note ?? ''
-                      if (!n.trim()) return null
-                      return (
-                        <div key={s.id} className="opNoteItem">
-                          <div className="opNoteTitle">{s.title}</div>
-                          <div className="opNoteText muted">{n}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="muted">No step notes recorded for this operation.</div>
-                )}
-              </div>
-            </div>
-          </>
+          </SidePanel>
+        ) : null}
+
+        {panel === 'notes' ? (
+          <SidePanel title="Notes" onClose={() => setPanel(null)}>
+            <OperationNotesPanel operation={operation} noteEntries={noteEntries} />
+          </SidePanel>
         ) : null}
 
         {!isComplete ? (
           <div className="gateBanner gateBannerSticky">
-            Set operator name and shift in <OpenProfileLink /> before completing steps.
+            Set operator name in <OpenProfileLink /> before completing steps.
           </div>
         ) : null}
 
-        <div className={`operationBody ${!isComplete ? 'operationBodyLocked' : ''}`}>
-        {operation.steps.map((step, index) => {
-          const meta = stepMeta[step.id] ?? { completed: false, note: '' }
-          const done = meta.completed
-          const canComplete = isComplete && stepInputsValid(step.inputs, values)
-
-          return (
-            <section
-              key={step.id}
-              ref={(el) => {
-                stepRefs.current[step.id] = el
-              }}
-              className={`stepCard ${done ? 'stepCardDone' : ''}`}
-            >
-              <div className="stepCardHead">
-                <div className="stepCardHeadLeft">
-                  <div className="stepNumber">{index + 1}</div>
-                  <h2 className="stepTitle">{step.title}</h2>
-                </div>
-                <StepToolbar
-                  stepId={step.id}
-                  done={done}
-                  completedBy={meta.completedBy}
-                  note={meta.note}
-                  canComplete={canComplete}
-                  actionsEnabled={isComplete}
-                  onToggleComplete={() =>
-                    done ? uncompleteStep(step.id) : completeStep(step.id, step.inputs)
-                  }
-                  onSaveNote={(note) => saveStepNote(step.id, note)}
-                  onNextStep={() => scrollToNextIncomplete(index)}
-                />
-              </div>
-
-              {step.bodyMarkdown ? (
-                <div className="stepBody doc">
-                  <MarkdownContent templatePath={templatePath}>
-                    {step.bodyMarkdown}
-                  </MarkdownContent>
-                </div>
-              ) : null}
-
-              {step.inputs.length > 0 ? (
-                <div className="stepInputs">
-                  {step.inputs.map((def) => (
-                    <InputField
-                      key={def.id}
-                      def={def}
-                      value={values[def.id]}
-                      disabled={!isComplete}
-                      onChange={(v) => handleInputChange(def.id, v)}
-                    />
-                  ))}
-                </div>
-              ) : null}
-            </section>
-          )
-        })}
-      </div>
+        <div
+          className={`operationBody operationBody_${operation.operationType} ${!isComplete ? 'operationBodyLocked' : ''}`}
+        >
+          {operation.operationType === 'checklist' ? (
+            <ChecklistOperationBody
+              sections={operation.checklistSections ?? []}
+              stepMeta={stepMeta}
+              values={values}
+              profileComplete={isComplete}
+              stepRefs={stepRefs}
+              onToggleSectionComplete={toggleChecklistSection}
+              onSaveNote={saveStepNote}
+              onInputChange={handleInputChange}
+              onInputCommit={commitInputChange}
+            />
+          ) : (
+            <InstructionOperationBody
+              steps={operation.steps}
+              stepMeta={stepMeta}
+              values={values}
+              templatePath={templatePath}
+              isComplete={isComplete}
+              stepRefs={stepRefs}
+              onToggleComplete={(stepId, inputs) =>
+                stepMeta[stepId]?.completed
+                  ? uncompleteStep(stepId)
+                  : completeStep(stepId, inputs)
+              }
+              onSaveNote={saveStepNote}
+              onNextStep={scrollToNextIncomplete}
+              onInputChange={handleInputChange}
+              onInputCommit={commitInputChange}
+              stepInputsValid={stepInputsValid}
+            />
+          )}
+        </div>
 
         {allDone ? (
           <footer className="operationFooter">

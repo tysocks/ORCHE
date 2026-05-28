@@ -1,5 +1,6 @@
 ---
 op_id: OP-000002
+operation_type: instruction
 default_title: Demo Test
 estimated_minutes: 8
 schema_version: 1

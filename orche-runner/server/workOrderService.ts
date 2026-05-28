@@ -1,7 +1,12 @@
 import path from 'path'
 import fs from 'fs/promises'
 import matter from 'gray-matter'
-import { parseRoutingTable } from '../src/lib/parseOperation'
+import { parseOperationMarkdown, parseRoutingTable } from '../src/lib/parseOperation'
+import { collectToolsForOperation, mergeToolEntries, type RequiredToolEntry } from '../src/lib/tools'
+import { deriveInputValues, operationHasRecordedData } from '../src/lib/events'
+import { insertRoutingRow, removeRoutingRow, serializeRoutingTable } from '../src/lib/routingTable'
+import { parseOperationType } from '../src/lib/operationTypes'
+import type { OperationType } from '../src/lib/operationTypes'
 import type { ProcessEvent } from '../src/lib/types'
 
 export type RoutingRow = {
@@ -28,6 +33,16 @@ export type TemplateRef = {
   operationName: string
   templatePath: string
   estimatedMinutes: number
+  operationType: OperationType
+}
+
+export async function readOperationTypeFromTemplate(
+  instructionLibraryRoot: string,
+  templateRelPath: string,
+): Promise<OperationType> {
+  const content = await fs.readFile(path.join(instructionLibraryRoot, templateRelPath), 'utf8')
+  const fm = matter(content).data as Record<string, unknown>
+  return parseOperationType(fm.operation_type)
 }
 
 function toPosix(p: string) {
@@ -39,7 +54,9 @@ function sortedEvents(events: ProcessEvent[]): ProcessEvent[] {
 }
 
 function matchesOp(e: ProcessEvent, operationNo: number, opId: string) {
-  if (e.operationNo != null) return e.operationNo === operationNo
+  if (e.operationNo != null && !Number.isNaN(Number(e.operationNo))) {
+    return Number(e.operationNo) === Number(operationNo)
+  }
   return e.opId === opId
 }
 
@@ -189,24 +206,20 @@ export async function buildTemplateIndex(instructionLibraryRoot: string): Promis
 }
 
 export async function generateWorkOrderId(workOrdersRoot: string): Promise<string> {
-  const date = new Date()
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  const prefix = `WO-${y}${m}${d}-`
   let entries: string[] = []
   try {
     entries = await fs.readdir(workOrdersRoot)
   } catch {
-    return `${prefix}0001`
+    return 'WO000001'
   }
   let max = 0
   for (const name of entries) {
-    if (!name.startsWith(prefix)) continue
-    const seq = Number(name.slice(prefix.length))
+    const match = name.match(/^WO(\d{6})$/i)
+    if (!match) continue
+    const seq = Number(match[1])
     if (!Number.isNaN(seq) && seq > max) max = seq
   }
-  return `${prefix}${String(max + 1).padStart(4, '0')}`
+  return `WO${String(max + 1).padStart(6, '0')}`
 }
 
 export type CreateWorkOrderInput = {
@@ -246,12 +259,14 @@ export async function createWorkOrder(
       templateIndex,
     )
     estimatedTotal += est
+    const operationType = await readOperationTypeFromTemplate(instructionLibraryRoot, templatePath)
     templateRefs.push({
       operationNo: row.operationNo,
       operationId: row.operationId,
       operationName: row.operationName,
       templatePath,
       estimatedMinutes: est,
+      operationType,
     })
   }
 
@@ -310,27 +325,36 @@ export function computeMetadataFromEvents(
       e.kind === 'step_completed' ||
       e.kind === 'step_uncompleted' ||
       e.kind === 'operation_completed' ||
-      e.kind === 'operation_uncompleted',
+      e.kind === 'operation_uncompleted' ||
+      e.kind === 'work_order_completed' ||
+      e.kind === 'work_order_uncompleted',
   )
 
-  const allComplete =
+  const allOpsComplete =
     routingRows.length > 0 &&
     routingRows.every((row) => deriveOpComplete(woEvents, row.operationNo, row.operationId))
 
+  let signedOff = false
+  for (const e of woEvents) {
+    if (e.kind === 'work_order_completed') signedOff = true
+    if (e.kind === 'work_order_uncompleted') signedOff = false
+  }
+
   let status = current.status
-  if (allComplete) status = 'Completed'
-  else if (hasActivity) status = 'Active'
+  if (signedOff && allOpsComplete) status = 'Completed'
+  else if (hasActivity || allOpsComplete) status = 'Active'
   else status = 'Not Started'
 
   const timestamps = woEvents.map((e) => e.at).filter(Boolean) as string[]
   const start_date = timestamps.length > 0 ? timestamps[0] : null
 
   let end_date: string | null = current.end_date ?? null
-  if (allComplete) {
-    const completedAts = woEvents
-      .filter((e) => e.kind === 'operation_completed' && e.at)
+  if (signedOff && allOpsComplete) {
+    const woCompleteAts = woEvents
+      .filter((e) => e.kind === 'work_order_completed' && e.at)
       .map((e) => e.at as string)
-    end_date = completedAts.length > 0 ? completedAts[completedAts.length - 1] : timestamps[timestamps.length - 1]
+    end_date =
+      woCompleteAts.length > 0 ? woCompleteAts[woCompleteAts.length - 1] : timestamps[timestamps.length - 1]
   } else {
     end_date = null
   }
@@ -401,6 +425,109 @@ export type WorkOrderSummary = {
     inputId: string
     value: unknown
   }>
+}
+
+export async function addRoutingOperation(
+  workOrderDir: string,
+  payload: {
+    operationNo: number
+    operationName: string
+  },
+): Promise<{ rows: RoutingRow[]; operationId: string }> {
+  const routingPath = path.join(workOrderDir, 'routing.md')
+  const routingText = await fs.readFile(routingPath, 'utf8')
+  const rows = parseRoutingTable(routingText)
+  if (rows.some((r) => r.operationNo === payload.operationNo)) {
+    throw new Error('Operation number already exists on this work order')
+  }
+  const nextOperationId = String(
+    rows.reduce((max, row) => {
+      const match = row.operationId.match(/(\d+)/)
+      const n = match ? Number(match[1]) : 0
+      return Number.isNaN(n) ? max : Math.max(max, n)
+    }, 0) + 1,
+  )
+  const row: RoutingRow = {
+    operationNo: payload.operationNo,
+    operationId: nextOperationId,
+    operationName: payload.operationName,
+    nextOperationNo: null,
+  }
+  const next = insertRoutingRow(rows, row)
+  const titleMatch = routingText.match(/^#\s+(.+)$/m)
+  const title = titleMatch?.[1]?.trim() || 'Routing'
+  await fs.writeFile(routingPath, serializeRoutingTable(next, title), 'utf8')
+  return { rows: next, operationId: nextOperationId }
+}
+
+export async function deleteRoutingOperation(
+  workOrderDir: string,
+  operationNo: number,
+  operationId: string,
+): Promise<{ rows: RoutingRow[]; operationName: string }> {
+  const routingPath = path.join(workOrderDir, 'routing.md')
+  const eventsPath = path.join(workOrderDir, 'process-events.jsonl')
+  const routingText = await fs.readFile(routingPath, 'utf8')
+  const rows = parseRoutingTable(routingText)
+  const id = operationId.toUpperCase()
+  const target = rows.find((r) => r.operationNo === operationNo && r.operationId === id)
+  if (!target) throw new Error('Operation not found on this work order')
+
+  const events = await readEvents(eventsPath)
+  if (operationHasRecordedData(events, operationNo, id)) {
+    throw new Error(
+      'Cannot delete an operation with completed steps, inputs, notes, or sign-off',
+    )
+  }
+
+  const next = removeRoutingRow(rows, operationNo, id)
+  const titleMatch = routingText.match(/^#\s+(.+)$/m)
+  const title = titleMatch?.[1]?.trim() || 'Routing'
+  await fs.writeFile(routingPath, serializeRoutingTable(next, title), 'utf8')
+  return { rows: next, operationName: target.operationName }
+}
+
+export type WorkOrderToolGroup = {
+  operationNo: number
+  operationId: string
+  operationName: string
+  tools: RequiredToolEntry[]
+}
+
+export async function loadWorkOrderToolGroups(
+  workOrderDir: string,
+  instructionLibraryRoot: string,
+): Promise<WorkOrderToolGroup[]> {
+  const routingText = await fs.readFile(path.join(workOrderDir, 'routing.md'), 'utf8')
+  const rows = parseRoutingTable(routingText)
+  const events = await readEvents(path.join(workOrderDir, 'process-events.jsonl'))
+  const templateIndex = await buildTemplateIndex(instructionLibraryRoot)
+
+  const groups: WorkOrderToolGroup[] = []
+  for (const row of rows) {
+    const templatePath = templateIndex.get(row.operationId)
+    let tools: RequiredToolEntry[] = []
+    if (templatePath) {
+      try {
+        const content = await fs.readFile(
+          path.join(instructionLibraryRoot, templatePath),
+          'utf8',
+        )
+        const parsed = parseOperationMarkdown(content)
+        const values = deriveInputValues(events, row.operationNo, row.operationId)
+        tools = mergeToolEntries(collectToolsForOperation(parsed, values))
+      } catch {
+        tools = []
+      }
+    }
+    groups.push({
+      operationNo: row.operationNo,
+      operationId: row.operationId,
+      operationName: row.operationName,
+      tools,
+    })
+  }
+  return groups
 }
 
 export async function buildWorkOrderSummary(

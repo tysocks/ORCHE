@@ -368,6 +368,45 @@
   box-shadow: var(--shadow);
 }
 
+.modalCardWide {
+  width: min(640px, calc(100vw - 2 * var(--content-pad-x)));
+}
+
+.modalTabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.modalTab {
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--text);
+  font: 13px/1 var(--sans);
+  font-weight: 600;
+  padding: 8px 12px;
+  margin-bottom: -1px;
+}
+
+.modalTab:hover {
+  background: color-mix(in oklab, var(--accent) 6%, var(--bg));
+}
+
+.modalTabActive {
+  border-color: var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.modalBodyScroll {
+  max-height: min(60svh, 520px);
+  overflow-y: auto;
+}
+
 .modalHead {
   display: flex;
   align-items: center;
@@ -403,6 +442,71 @@
   border-radius: 12px;
   padding: 10px 12px;
   background: color-mix(in oklab, var(--bg) 96%, var(--code-bg));
+}
+
+.actionLogList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.actionLogEntry {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in oklab, var(--bg) 97%, var(--code-bg));
+  border-left-width: 3px;
+}
+
+.actionLogKind_done {
+  border-left-color: color-mix(in oklab, #4caf50 70%, var(--border));
+}
+
+.actionLogKind_reopen {
+  border-left-color: color-mix(in oklab, #ff9800 65%, var(--border));
+}
+
+.actionLogKind_input {
+  border-left-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+}
+
+.actionLogKind_note {
+  border-left-color: color-mix(in oklab, #64b5f6 55%, var(--border));
+}
+
+.actionLogEntryHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.actionLogTitle {
+  font-weight: 650;
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.actionLogTime {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.actionLogDetail {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.actionLogOperator {
+  margin-top: 4px;
+  font-size: 12px;
 }
 
 .opNoteTitle {
@@ -506,6 +610,10 @@
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+  box-sizing: border-box;
+  cursor: pointer;
   background: color-mix(in oklab, var(--bg) 95%, var(--code-bg));
   cursor: pointer;
   text-align: left;
@@ -842,6 +950,48 @@
   gap: 6px;
 }
 
+.operationsListRunner {
+  gap: 6px;
+}
+
+.woDetailsList {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.woDetailsRow {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.woDetailsRow dt {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.woDetailsRow dd {
+  margin: 0;
+}
+
+.errorBannerOverlay {
+  position: fixed;
+  top: 52px;
+  left: 0;
+  right: 0;
+  z-index: 200;
+}
+
+.stepToolBtn .iconMenuSvg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
 .operationRow {
   width: 100%;
   display: flex;
@@ -851,17 +1001,20 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   background: color-mix(in oklab, var(--bg) 95%, var(--code-bg));
+  text-decoration: none;
+  color: inherit;
+  box-sizing: border-box;
+  cursor: pointer;
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.operationRow:hover:not(:disabled) {
+.operationRow:hover:not(.operationRowDisabled) {
   border-color: var(--accent-border);
   box-shadow: var(--shadow);
 }
 
-.operationRow:disabled,
 .operationRowDisabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -936,6 +1089,280 @@
 .operationStatusIcon_blocked {
   background: color-mix(in oklab, #ff9800 15%, var(--bg));
   color: #e65100;
+}
+
+.opTypeTag {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+}
+
+.opTypeTag_instruction {
+  color: var(--text);
+}
+
+.opTypeTag_checklist {
+  color: var(--text);
+}
+
+.opTypePill {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+}
+
+.opTypePill_instruction {
+  color: var(--text);
+}
+
+.opTypePill_checklist {
+  color: var(--text);
+}
+
+.operationBody_checklist {
+  padding-top: 4px;
+}
+
+.checklistOperation {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checklistSection {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--bg) 96%, var(--code-bg));
+  overflow: hidden;
+}
+
+.checklistSectionDone {
+  border-color: color-mix(in oklab, #4caf50 40%, var(--border));
+}
+
+.checklistSectionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  min-height: 34px;
+  background: color-mix(in oklab, var(--accent) 6%, var(--bg));
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.checklistSectionHead .checklistCompleteBtn,
+.checklistSectionHead .stepToolBtn {
+  height: 30px;
+  min-height: 30px;
+}
+
+.checklistSectionHead .stepToolSquare {
+  width: 30px;
+}
+
+.checklistSectionHead .checklistCompleteBtn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.checklistSectionNum {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-h);
+  flex-shrink: 0;
+}
+
+.checklistSectionTitle {
+  flex: 1;
+  min-width: 100px;
+  font-weight: 650;
+  font-size: 13px;
+  color: var(--text-h);
+  line-height: 1.2;
+}
+
+.checklistSectionNote {
+  font-size: 11px;
+  padding: 0 10px 5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.checklistItems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.checklistItem {
+  border-bottom: 1px solid var(--border);
+}
+
+.checklistItem:last-child {
+  border-bottom: none;
+}
+
+.checklistItemReady {
+  background: color-mix(in oklab, var(--bg) 90%, white);
+}
+
+[data-theme='dark'] .checklistItemReady {
+  background: color-mix(in oklab, var(--bg) 92%, white);
+}
+
+.checklistItemLocked {
+  opacity: 0.92;
+}
+
+.checklistItemRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 3px 8px;
+  flex-wrap: wrap;
+}
+
+.checklistItemNum {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-h);
+  min-width: 26px;
+}
+
+.checklistItemTitle {
+  flex: 1;
+  min-width: 80px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-h);
+  line-height: 1.2;
+}
+
+.checklistCompleteBtn {
+  flex-shrink: 0;
+}
+
+.checklistItemTrail {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.checklistItemInputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.checklistInlineYn {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+
+.checklistYnBtn {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: 11px/1 var(--sans);
+  font-weight: 700;
+  padding: 5px 10px;
+  min-width: 36px;
+  white-space: nowrap;
+}
+
+.checklistYnBtn:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg));
+}
+
+.checklistYnBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.checklistYnBtnActive {
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+.checklistInlineField {
+  width: 80px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.checklistInlineTextarea {
+  width: min(200px, 40vw);
+  min-height: 36px;
+  resize: vertical;
+}
+
+.checklistNoteBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.checklistNoteBtnActive {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.checklistNoteIcon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.checklistItemNotePanel {
+  padding: 6px 8px 8px 34px;
+  border-top: 1px dashed var(--border);
+  background: color-mix(in oklab, var(--bg) 98%, var(--code-bg));
+}
+
+.checklistNoteInput {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.checklistItemNoteActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
 }
 
 .iconBtn:disabled {
@@ -1562,9 +1989,10 @@
   pointer-events: none;
 }
 
-.homeRow:disabled {
+.homeRowDisabled {
   opacity: 0.5;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .mdTableWrap {
@@ -1618,4 +2046,322 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.menuDropdownWrap {
+  position: relative;
+}
+
+.menuDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: 0 12px 40px color-mix(in oklab, #000 25%, transparent);
+}
+
+.menuDropdownItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.menuDropdownItem:hover:not(:disabled) {
+  background: var(--code-bg);
+}
+
+.menuDropdownItem:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.stepToolBtnActive {
+  border-color: var(--accent-border);
+  background: color-mix(in oklab, var(--accent) 12%, var(--code-bg));
+}
+
+.sidePanelScrim {
+  position: fixed;
+  inset: 0;
+  z-index: 280;
+  border: none;
+  background: color-mix(in oklab, #000 35%, transparent);
+  cursor: pointer;
+}
+
+.sidePanel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 290;
+  height: 100svh;
+  width: min(420px, 100vw);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: -8px 0 32px color-mix(in oklab, #000 12%, transparent);
+}
+
+.sidePanel_lg {
+  width: min(560px, 100vw);
+}
+
+.sidePanelHead {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidePanelTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.sidePanelBody {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.toolsTableWrap {
+  overflow-x: auto;
+}
+
+.toolsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.toolsTable th,
+.toolsTable td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.toolsTable th {
+  background: var(--code-bg);
+  font-weight: 600;
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
+.woPanelStack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.collapsibleGroup {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.collapsibleGroupHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: var(--code-bg);
+  color: var(--text-h);
+  cursor: pointer;
+  text-align: left;
+  font-size: 14px;
+}
+
+.collapsibleGroupTitle {
+  flex: 1;
+  font-weight: 600;
+}
+
+.collapsibleGroupMeta {
+  font-size: 12px;
+}
+
+.collapsibleGroupBody {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.notesPanelList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.opNoteItem {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.opNoteItem:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.opNoteTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 4px;
+}
+
+.opNoteText {
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.hierarchyPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.hierarchyChain {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hierarchyLink {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--code-bg);
+}
+
+.hierarchyNode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hierarchyNo {
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 2ch;
+}
+
+.hierarchyName {
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.hierarchyId {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.hierarchyArrow {
+  font-size: 13px;
+  color: var(--muted);
+  padding-left: 4px;
+}
+
+.hierarchyStandalone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hierarchyNodeStandalone {
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.addOpForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.addOpHint {
+  margin: 0;
+  font-size: 13px;
+}
+
+.addOpActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.deleteOpWarning {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--danger, #c44) 40%, var(--border));
+  background: color-mix(in oklab, var(--danger, #c44) 8%, var(--code-bg));
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-h);
+}
+
+.deleteOpConfirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.deleteOpConfirm input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.buttonDanger {
+  cursor: pointer;
+  border: 1px solid color-mix(in oklab, var(--danger, #c44) 50%, transparent);
+  background: color-mix(in oklab, var(--danger, #c44) 85%, #000);
+  color: #fff;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.buttonDanger:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.buttonDanger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.equipmentInputGrid {
+  display: grid;
+  gap: 8px;
 }

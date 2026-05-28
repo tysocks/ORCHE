@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { handleRouteLinkClick, workOrderUrl } from '../lib/routes'
 import type { WorkOrderListItem } from '../lib/types'
 import { useUserSettings } from '../context/UserSettingsContext'
 import { CreateWorkOrderForm } from './CreateWorkOrderForm'
@@ -68,8 +69,7 @@ export function HomeView({ workOrders, loading, onOpen, onCreated, onRefreshList
     <div className="homeView">
       {!isComplete ? (
         <div className="gateBanner gateBannerCompact">
-          Enter your operator name and shift in <OpenProfileLink /> before opening or creating
-          work orders.
+          Enter your operator name in <OpenProfileLink /> before opening or creating work orders.
         </div>
       ) : null}
 
@@ -96,7 +96,7 @@ export function HomeView({ workOrders, loading, onOpen, onCreated, onRefreshList
             <input
               className="input"
               type="search"
-              placeholder="WO-…"
+              placeholder="Search work order (e.g. WO000123)"
               value={filters.workOrderId}
               onChange={(e) => updateFilter('workOrderId', e.target.value)}
               disabled={!isComplete}
@@ -107,7 +107,7 @@ export function HomeView({ workOrders, loading, onOpen, onCreated, onRefreshList
             <input
               className="input"
               type="search"
-              placeholder="E02-…"
+              placeholder="Search part number"
               value={filters.partNumber}
               onChange={(e) => updateFilter('partNumber', e.target.value)}
               disabled={!isComplete}
@@ -118,7 +118,7 @@ export function HomeView({ workOrders, loading, onOpen, onCreated, onRefreshList
             <input
               className="input"
               type="search"
-              placeholder="SN-…"
+              placeholder="Search serial number"
               value={filters.serialNumber}
               onChange={(e) => updateFilter('serialNumber', e.target.value)}
               disabled={!isComplete}
@@ -152,11 +152,17 @@ export function HomeView({ workOrders, loading, onOpen, onCreated, onRefreshList
           <ul className="homeList">
             {filtered.map((wo) => (
               <li key={wo.id}>
-                <button
-                  type="button"
-                  className="homeRow"
-                  onClick={() => onOpen(wo.id)}
-                  disabled={!isComplete}
+                <a
+                  href={workOrderUrl(wo.id)}
+                  className={`homeRow ${!isComplete ? 'homeRowDisabled' : ''}`}
+                  aria-disabled={!isComplete}
+                  onClick={(e) => {
+                    if (!isComplete) {
+                      e.preventDefault()
+                      return
+                    }
+                    handleRouteLinkClick(e, () => onOpen(wo.id))
+                  }}
                 >
                   <div className="homeRowBody">
                     <div className="homeRowId">{wo.id}</div>
@@ -177,7 +183,7 @@ export function HomeView({ workOrders, loading, onOpen, onCreated, onRefreshList
                     </div>
                   </div>
                   <span className={`homeStatus ${statusClass(wo.status)}`}>{wo.status}</span>
-                </button>
+                </a>
               </li>
             ))}
           </ul>

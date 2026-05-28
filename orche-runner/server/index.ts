@@ -14,7 +14,11 @@ import {
   listWorkOrders,
   loadRoutingTemplate,
   readEvents,
+  readOperationTypeFromTemplate,
   syncWorkOrderMetadata,
+  addRoutingOperation,
+  deleteRoutingOperation,
+  loadWorkOrderToolGroups,
 } from './workOrderService'
 
 type TemplateListItem = {
@@ -255,8 +259,22 @@ app.get('/api/work-orders/:workOrderId', async (req, res) => {
       fs.readFile(routingPath, 'utf8'),
     ])
     const wo = matter(woText)
-    const rows = parseRoutingTable(routingText)
+    const rows = parseRoutingTable(routingText).sort((a, b) => a.operationNo - b.operationNo)
     const templateIndex = await buildTemplateIndex(instructionLibraryRoot)
+
+    const operations = await Promise.all(
+      rows.map(async (row) => {
+        const templatePath = templateIndex.get(row.operationId) ?? null
+        const operationType = templatePath
+          ? await readOperationTypeFromTemplate(instructionLibraryRoot, templatePath)
+          : 'instruction'
+        return {
+          ...row,
+          templatePath,
+          operationType,
+        }
+      }),
+    )
 
     res.json({
       id: workOrderId,
@@ -268,10 +286,7 @@ app.get('/api/work-orders/:workOrderId', async (req, res) => {
       endDate: wo.data.end_date ?? null,
       estimatedTimeMinutes: wo.data.estimated_time_minutes ?? null,
       actualTimeMinutes: wo.data.actual_time_minutes ?? null,
-      operations: rows.map((row) => ({
-        ...row,
-        templatePath: templateIndex.get(row.operationId) ?? null,
-      })),
+      operations,
     })
   } catch {
     res.status(404).json({ error: 'Work order not found' })
@@ -326,6 +341,63 @@ app.post('/api/work-orders/:workOrderId/events', async (req, res) => {
     res.json({ ok: true })
   } catch {
     res.status(500).json({ error: 'Failed to append event' })
+  }
+})
+
+app.post('/api/work-orders/:workOrderId/operations', async (req, res) => {
+  const workOrderId = String(req.params.workOrderId ?? '').trim()
+  const body = req.body as {
+    operationNo?: number
+    operationName?: string
+  }
+  const operationNo = Number(body.operationNo)
+  const operationName = String(body.operationName ?? '').trim()
+  if (!workOrderId || Number.isNaN(operationNo) || !operationName) {
+    res.status(400).json({ error: 'operationNo and operationName are required' })
+    return
+  }
+  const dir = path.join(workOrdersRoot, workOrderId)
+  try {
+    const { rows, operationId } = await addRoutingOperation(dir, {
+      operationNo,
+      operationName,
+    })
+    await syncWorkOrderMetadata(dir)
+    res.json({ ok: true, operations: rows, operationId })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to add operation'
+    res.status(400).json({ error: message })
+  }
+})
+
+app.delete('/api/work-orders/:workOrderId/operations', async (req, res) => {
+  const workOrderId = String(req.params.workOrderId ?? '').trim()
+  const body = req.body as { operationNo?: number; operationId?: string }
+  const operationNo = Number(body.operationNo)
+  const operationId = String(body.operationId ?? '').trim()
+  if (!workOrderId || Number.isNaN(operationNo) || !operationId) {
+    res.status(400).json({ error: 'operationNo and operationId are required' })
+    return
+  }
+  const dir = path.join(workOrdersRoot, workOrderId)
+  try {
+    const { rows, operationName } = await deleteRoutingOperation(dir, operationNo, operationId)
+    await syncWorkOrderMetadata(dir)
+    res.json({ ok: true, operations: rows, operationName })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to delete operation'
+    res.status(400).json({ error: message })
+  }
+})
+
+app.get('/api/work-orders/:workOrderId/tools', async (req, res) => {
+  const workOrderId = String(req.params.workOrderId ?? '').trim()
+  const dir = path.join(workOrdersRoot, workOrderId)
+  try {
+    const groups = await loadWorkOrderToolGroups(dir, instructionLibraryRoot)
+    res.json({ groups })
+  } catch {
+    res.status(404).json({ error: 'Work order not found' })
   }
 })
 

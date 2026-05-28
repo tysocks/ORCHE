@@ -1,11 +1,41 @@
 import type { ProcessEvent } from './types'
 
-function matchesOperation(e: ProcessEvent, operationNo: number, opId: string): boolean {
-  if (e.operationNo != null) return e.operationNo === operationNo
-  return e.opId === opId
+export function matchesOperation(e: ProcessEvent, operationNo: number, opId: string): boolean {
+  const normalizedOpId = opId.toUpperCase()
+  const eventOpId = e.opId?.toUpperCase()
+  const hasNo = e.operationNo != null && !Number.isNaN(Number(e.operationNo))
+  const hasId = Boolean(eventOpId)
+
+  if (hasNo && hasId) {
+    return Number(e.operationNo) === Number(operationNo) && eventOpId === normalizedOpId
+  }
+  if (hasNo) return Number(e.operationNo) === Number(operationNo)
+  if (hasId) return eventOpId === normalizedOpId
+  return false
 }
 
-function sortedByTime(events: ProcessEvent[]): ProcessEvent[] {
+/** True when any step input, note, or operation sign-off exists for this operation. */
+export function operationHasRecordedData(
+  events: ProcessEvent[],
+  operationNo: number,
+  opId: string,
+): boolean {
+  for (const e of sortedByTime(events)) {
+    if (!matchesOperation(e, operationNo, opId)) continue
+    if (
+      e.kind === 'step_completed' ||
+      e.kind === 'step_uncompleted' ||
+      e.kind === 'input_changed' ||
+      e.kind === 'step_note' ||
+      e.kind === 'operation_completed'
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+export function sortedByTime(events: ProcessEvent[]): ProcessEvent[] {
   return [...events].sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
 }
 
@@ -97,6 +127,37 @@ export function deriveOperationStatus(
   )
   if (hasActivity || completed.size > 0) return 'in_progress'
   return 'not_started'
+}
+
+export function deriveWorkOrderSignedOff(events: ProcessEvent[]): boolean {
+  let signedOff = false
+  for (const e of sortedByTime(events)) {
+    if (e.kind === 'work_order_completed') signedOff = true
+    if (e.kind === 'work_order_uncompleted') signedOff = false
+  }
+  return signedOff
+}
+
+export function deriveWorkOrderCompletedBy(events: ProcessEvent[]): string | undefined {
+  let name: string | undefined
+  for (const e of sortedByTime(events)) {
+    if (e.kind === 'work_order_completed') {
+      name =
+        (e.completedBy as string | undefined) ?? (e.operatorName as string | undefined) ?? name
+    }
+    if (e.kind === 'work_order_uncompleted') name = undefined
+  }
+  return name
+}
+
+export function deriveAllOperationsComplete(
+  events: ProcessEvent[],
+  operations: { operationNo: number; operationId: string }[],
+): boolean {
+  if (operations.length === 0) return false
+  return operations.every(
+    (op) => deriveOperationStatus(events, op.operationNo, op.operationId) === 'completed',
+  )
 }
 
 export function deriveBlockedOps(

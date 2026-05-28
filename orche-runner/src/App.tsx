@@ -3,13 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AppShell } from './components/AppShell'
 import { HomeView } from './components/HomeView'
 import { OperationRunner } from './components/OperationRunner'
-import { WorkOrderView } from './components/WorkOrderView'
+import { WorkOrderRunner } from './components/WorkOrderRunner'
 import {
   WorkOrderSummaryView,
   type WorkOrderSummaryData,
 } from './components/WorkOrderSummaryView'
 import { useUserSettings } from './context/UserSettingsContext'
 import { deriveBlockedOps, deriveOperationStatus } from './lib/events'
+import { type AppRoute, navigateTo, readRoute } from './lib/routes'
 import type {
   ParsedOperation,
   ProcessEvent,
@@ -17,8 +18,6 @@ import type {
   WorkOrderListItem,
   WorkOrderOperation,
 } from './lib/types'
-
-type Screen = 'home' | 'work-order' | 'summary'
 
 type WorkOrderData = {
   id: string
@@ -39,20 +38,31 @@ type ActiveOperation = WorkOrderOperation & {
 
 export default function App() {
   const { settings, isComplete: userSettingsComplete } = useUserSettings()
-  const [screen, setScreen] = useState<Screen>('home')
+  const [route, setRoute] = useState<AppRoute>(readRoute)
   const [workOrderList, setWorkOrderList] = useState<WorkOrderListItem[]>([])
   const [listLoading, setListLoading] = useState(true)
-  const [workOrderId, setWorkOrderId] = useState<string | null>(null)
   const [workOrder, setWorkOrder] = useState<WorkOrderData | null>(null)
   const [summary, setSummary] = useState<WorkOrderSummaryData | null>(null)
-  const [woLoading, setWoLoading] = useState(false)
-  const [summaryLoading, setSummaryLoading] = useState(false)
   const [events, setEvents] = useState<ProcessEvent[]>([])
   const [activeOp, setActiveOp] = useState<ActiveOperation | null>(null)
   const [activeParsed, setActiveParsed] = useState<ParsedOperation | null>(null)
   const [activeTemplatePath, setActiveTemplatePath] = useState<string | null>(null)
-  const [openingOp, setOpeningOp] = useState(false)
+  const [woLoading, setWoLoading] = useState(false)
+  const [opLoading, setOpLoading] = useState(false)
+  const [summaryLoading, setSummaryLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const onPopState = () => setRoute(readRoute())
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  function goTo(next: AppRoute, replace = false) {
+    navigateTo(next, replace)
+    setRoute(next)
+    setLoadError(null)
+  }
 
   const refreshWorkOrderList = useCallback(() => {
     setListLoading(true)
@@ -96,17 +106,17 @@ export default function App() {
   }, [refreshWorkOrderList])
 
   useEffect(() => {
-    if (screen !== 'home') return
-    const id = setInterval(() => {
-      refreshWorkOrderList()
-    }, 5000)
+    if (route.screen !== 'home') return
+    const id = setInterval(() => refreshWorkOrderList(), 5000)
     return () => clearInterval(id)
-  }, [screen, refreshWorkOrderList])
+  }, [route.screen, refreshWorkOrderList])
 
-  const refreshEvents = useCallback(async (id: string) => {
-    const r = await fetch(`/api/work-orders/${encodeURIComponent(id)}/events`)
+  const refreshEvents = useCallback(async (workOrderId: string) => {
+    const r = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/events`)
     const data = await r.json()
-    setEvents(Array.isArray(data?.events) ? data.events : [])
+    const list = Array.isArray(data?.events) ? data.events : []
+    setEvents(list)
+    return list
   }, [])
 
   const loadWorkOrder = useCallback(
@@ -121,15 +131,15 @@ export default function App() {
         if (!woRes.ok) {
           setWorkOrder(null)
           setLoadError('Work order not found')
-          return false
+          return null
         }
         const wo = (await woRes.json()) as WorkOrderData
         setWorkOrder(wo)
-        setWorkOrderId(id)
-        return true
+        return wo
       } catch {
+        setWorkOrder(null)
         setLoadError('Failed to load work order')
-        return false
+        return null
       } finally {
         setWoLoading(false)
       }
@@ -137,63 +147,103 @@ export default function App() {
     [refreshEvents],
   )
 
-  async function openWorkOrder(id: string) {
-    if (!userSettingsComplete) return
-    const ok = await loadWorkOrder(id)
-    if (ok) setScreen('work-order')
-  }
+  const workOrderId =
+    route.screen === 'home' ? null : route.workOrderId
 
-  async function loadSummary(id: string) {
+  useEffect(() => {
+    if (!workOrderId) {
+      setWorkOrder(null)
+      setEvents([])
+      return
+    }
+    void loadWorkOrder(workOrderId)
+  }, [workOrderId, loadWorkOrder])
+
+  useEffect(() => {
+    if (route.screen !== 'summary' || !workOrderId) {
+      if (route.screen !== 'summary') setSummary(null)
+      return
+    }
+    let cancelled = false
     setSummaryLoading(true)
     setLoadError(null)
-    try {
-      const r = await fetch(`/api/work-orders/${encodeURIComponent(id)}/summary`)
-      if (!r.ok) {
-        setLoadError('Failed to load summary')
-        return
-      }
-      const data = await r.json()
-      setSummary(data.summary as WorkOrderSummaryData)
-      setScreen('summary')
-      await loadWorkOrder(id)
-    } catch {
-      setLoadError('Failed to load summary')
-    } finally {
-      setSummaryLoading(false)
+    fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/summary`)
+      .then((r) => {
+        if (!r.ok) throw new Error('summary')
+        return r.json()
+      })
+      .then((data) => {
+        if (!cancelled) setSummary(data.summary as WorkOrderSummaryData)
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError('Failed to load summary')
+      })
+      .finally(() => {
+        if (!cancelled) setSummaryLoading(false)
+      })
+    return () => {
+      cancelled = true
     }
-  }
+  }, [route.screen, workOrderId])
 
-  function goHome() {
-    setScreen('home')
-    setWorkOrderId(null)
-    setWorkOrder(null)
-    setSummary(null)
-    setEvents([])
+  useEffect(() => {
+    if (route.screen !== 'operation' || !workOrderId) {
+      setActiveOp(null)
+      setActiveParsed(null)
+      setActiveTemplatePath(null)
+      return
+    }
+
+    const opRow = workOrder?.operations.find((o) => o.operationNo === route.operationNo)
+    if (!opRow?.templatePath) {
+      if (workOrder && !woLoading) {
+        setLoadError('Operation not found on this work order')
+      }
+      return
+    }
+
+    let cancelled = false
+    setOpLoading(true)
     setLoadError(null)
-    setActiveOp(null)
-    setActiveParsed(null)
-    setActiveTemplatePath(null)
-  }
 
-  function backFromSummary() {
-    setSummary(null)
-    setScreen('work-order')
-  }
+    Promise.all([
+      fetch(`/api/operation?path=${encodeURIComponent(opRow.templatePath)}`),
+      refreshEvents(workOrderId),
+    ])
+      .then(async ([r]) => {
+        if (!r.ok) throw new Error('operation')
+        const data = await r.json()
+        if (cancelled) return
+        setActiveParsed(data.operation as ParsedOperation)
+        setActiveTemplatePath(opRow.templatePath)
+        setActiveOp({ ...opRow, templatePath: opRow.templatePath } as ActiveOperation)
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError('Failed to load operation')
+      })
+      .finally(() => {
+        if (!cancelled) setOpLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [route, workOrder, workOrderId, woLoading, refreshEvents])
 
   const operationsWithStatus: WorkOrderOperation[] = useMemo(() => {
     if (!workOrder) return []
 
     const completedOpNos = new Set<number>()
-    const ops = workOrder.operations
-
-    for (const op of ops) {
-      const status = deriveOperationStatus(events, op.operationNo, op.operationId)
-      if (status === 'completed') completedOpNos.add(op.operationNo)
+    for (const op of workOrder.operations) {
+      if (deriveOperationStatus(events, op.operationNo, op.operationId) === 'completed') {
+        completedOpNos.add(op.operationNo)
+      }
     }
+    const blocked = deriveBlockedOps(workOrder.operations, completedOpNos)
 
-    const blocked = deriveBlockedOps(ops, completedOpNos)
-
-    return ops.map((op) => {
+    return [...workOrder.operations]
+      .sort((a, b) => a.operationNo - b.operationNo)
+      .map((op) => {
       let status: WorkOrderOperation['status'] = deriveOperationStatus(
         events,
         op.operationNo,
@@ -204,55 +254,48 @@ export default function App() {
     })
   }, [workOrder, events])
 
-  async function openOperation(op: WorkOrderOperation) {
-    if (!userSettingsComplete || !op.templatePath || !workOrderId) return
-    setOpeningOp(true)
-    setLoadError(null)
-    try {
-      const r = await fetch(`/api/operation?path=${encodeURIComponent(op.templatePath)}`)
-      if (!r.ok) {
-        setLoadError('Failed to load operation')
-        return
-      }
-      const data = await r.json()
-      await refreshEvents(workOrderId)
-      setActiveParsed(data.operation as ParsedOperation)
-      setActiveTemplatePath(op.templatePath)
-      setActiveOp({ ...op, templatePath: op.templatePath })
-    } catch {
-      setLoadError('Failed to load operation')
-    } finally {
-      setOpeningOp(false)
-    }
+  function openWorkOrder(id: string) {
+    if (!userSettingsComplete) return
+    goTo({ screen: 'work-order', workOrderId: id })
   }
 
-  function closeOperation() {
-    setActiveOp(null)
-    setActiveParsed(null)
-    setActiveTemplatePath(null)
-    if (workOrderId) {
-      refreshEvents(workOrderId)
-      loadWorkOrder(workOrderId)
-    }
-  }
-
-  async function appendEvent(event: object) {
-    if (!activeOp || !workOrderId || !userSettingsComplete) return
-    await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/events`, {
+  async function appendWorkOrderEvent(workOrderId: string, event: object) {
+    if (!userSettingsComplete) return
+    const res = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/events`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         workOrderId,
-        operationNo: activeOp.operationNo,
-        opId: activeOp.operationId,
         operatorName: settings.operatorName,
-        workShift: settings.workShift,
         ...event,
       }),
     })
+    if (!res.ok) {
+      console.error('Failed to record event', await res.text().catch(() => res.statusText))
+    }
   }
 
-  if (activeOp && activeParsed && activeTemplatePath && workOrderId) {
+  async function appendOperationEvent(event: object) {
+    if (!activeOp || !workOrderId || !userSettingsComplete) return
+    await appendWorkOrderEvent(workOrderId, {
+      operationNo: activeOp.operationNo,
+      opId: activeOp.operationId,
+      ...event,
+    })
+  }
+
+  async function refreshWorkOrderState(id: string) {
+    await refreshEvents(id)
+    await loadWorkOrder(id)
+  }
+
+  if (
+    route.screen === 'operation' &&
+    activeOp &&
+    activeParsed &&
+    activeTemplatePath &&
+    workOrderId
+  ) {
     return (
       <OperationRunner
         operation={activeParsed}
@@ -261,25 +304,28 @@ export default function App() {
         operationName={activeOp.operationName}
         workOrderId={workOrderId}
         events={events}
-        onHome={goHome}
-        onBack={closeOperation}
-        onEvent={appendEvent}
+        onHome={() => goTo({ screen: 'home' })}
+        onBack={() => goTo({ screen: 'work-order', workOrderId })}
+        onEvent={appendOperationEvent}
         onRefreshEvents={() => refreshEvents(workOrderId)}
       />
     )
   }
 
-  if (screen === 'summary' && summary) {
+  if (route.screen === 'summary' && summary && workOrderId) {
     return (
-      <AppShell onHome={goHome}>
-        <WorkOrderSummaryView summary={summary} onBack={backFromSummary} />
+      <AppShell onHome={() => goTo({ screen: 'home' })}>
+        <WorkOrderSummaryView
+          summary={summary}
+          onBack={() => goTo({ screen: 'work-order', workOrderId })}
+        />
       </AppShell>
     )
   }
 
-  if (screen === 'home') {
+  if (route.screen === 'home') {
     return (
-      <AppShell>
+      <AppShell onHome={() => goTo({ screen: 'home' })}>
         <HomeView
           workOrders={workOrderList}
           loading={listLoading}
@@ -292,37 +338,53 @@ export default function App() {
     )
   }
 
+  if (woLoading && !workOrder) {
+    return (
+      <AppShell onHome={() => goTo({ screen: 'home' })}>
+        <div className="muted">Loading work order…</div>
+      </AppShell>
+    )
+  }
+
+  if (!workOrder || !workOrderId) {
+    return (
+      <AppShell onHome={() => goTo({ screen: 'home' })}>
+        {loadError ? <div className="errorBanner">{loadError}</div> : null}
+        <p className="muted">{loadError ?? 'Work order unavailable.'}</p>
+      </AppShell>
+    )
+  }
+
   return (
-    <AppShell onHome={goHome}>
-      {loadError ? <div className="errorBanner">{loadError}</div> : null}
-      {openingOp || summaryLoading ? (
+    <>
+      {loadError ? <div className="errorBanner errorBannerOverlay">{loadError}</div> : null}
+      {opLoading || summaryLoading ? (
         <div className="loadingOverlay">
           {summaryLoading ? 'Loading summary…' : 'Opening operation…'}
         </div>
       ) : null}
-
-      {woLoading && !workOrder ? (
-        <div className="muted">Loading work order…</div>
-      ) : workOrder && workOrderId ? (
-        <WorkOrderView
-          workOrderId={workOrder.id}
-          partNumber={workOrder.partNumber}
-          serialNumber={workOrder.serialNumber}
-          routing={workOrder.routing}
-          status={workOrder.status}
-          operations={operationsWithStatus}
-          actionsEnabled={userSettingsComplete}
-          onOpenSummary={() => loadSummary(workOrderId)}
-          onSelectOperation={openOperation}
-        />
-      ) : (
-        <div>
-          <button type="button" className="buttonGhost" onClick={goHome}>
-            ← Back
-          </button>
-          <p className="muted">{loadError ?? 'Work order unavailable.'}</p>
-        </div>
-      )}
-    </AppShell>
+      <WorkOrderRunner
+        workOrder={{
+          id: workOrder.id,
+          partNumber: workOrder.partNumber,
+          serialNumber: workOrder.serialNumber,
+          routing: workOrder.routing,
+          status: workOrder.status,
+          startDate: workOrder.startDate,
+          endDate: workOrder.endDate,
+          estimatedTimeMinutes: workOrder.estimatedTimeMinutes,
+          actualTimeMinutes: workOrder.actualTimeMinutes,
+        }}
+        operations={operationsWithStatus}
+        events={events}
+        onHome={() => goTo({ screen: 'home' })}
+        onNavigateOperation={(op) =>
+          goTo({ screen: 'operation', workOrderId, operationNo: op.operationNo })
+        }
+        onOpenSummary={() => goTo({ screen: 'summary', workOrderId })}
+        onEvent={(event) => appendWorkOrderEvent(workOrderId, event)}
+        onRefresh={() => refreshWorkOrderState(workOrderId)}
+      />
+    </>
   )
 }

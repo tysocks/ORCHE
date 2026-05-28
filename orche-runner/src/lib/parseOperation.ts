@@ -1,7 +1,11 @@
 import matter from 'gray-matter'
+import { parseChecklistMarkdown } from './parseChecklist'
+import { parseOperationType } from './operationTypes'
+import { parseRequiredTools } from './tools'
 import type { OperationStep, OrcheInput, ParsedOperation } from './types'
 
 const ORCHE_INPUT_RE = /```orche-input\s*\n([\s\S]*?)```/g
+const REQUIRED_TOOLS_BLOCK_RE = /(?:^|\n)(```|''')required_tools\s*\n([\s\S]*?)\n\1\s*(?=\n|$)/gi
 
 export function safeJsonParse<T>(raw: string): { ok: true; value: T } | { ok: false } {
   try {
@@ -56,23 +60,103 @@ function parseSteps(markdown: string): { intro: string; steps: OperationStep[] }
   return { intro, steps }
 }
 
+function parseRequiredToolsBlock(content: string): Array<string | Record<string, unknown>> {
+  const out: Array<string | Record<string, unknown>> = []
+  const lines = content
+    .split('\n')
+    .map((line) => line.replace(/\r$/, ''))
+    .filter((line) => line.trim().length > 0)
+
+  let i = 0
+  while (i < lines.length) {
+    const raw = lines[i].trim()
+    if (!raw.startsWith('- ')) {
+      i++
+      continue
+    }
+
+    const first = raw.slice(2).trim()
+    if (!first) {
+      i++
+      continue
+    }
+
+    const inlineKeyValue = first.match(/^([a-zA-Z0-9_]+)\s*:\s*(.+)$/)
+    if (inlineKeyValue) {
+      const obj: Record<string, unknown> = { [inlineKeyValue[1]]: inlineKeyValue[2].trim() }
+      i++
+      while (i < lines.length) {
+        const next = lines[i]
+        if (next.trim().startsWith('- ')) break
+        const kv = next.trim().match(/^([a-zA-Z0-9_]+)\s*:\s*(.+)$/)
+        if (kv) obj[kv[1]] = kv[2].trim()
+        i++
+      }
+      out.push(obj)
+      continue
+    }
+
+    out.push(first)
+    i++
+  }
+
+  return out
+}
+
+function extractRequiredToolsSection(markdown: string): {
+  cleanedMarkdown: string
+  requiredTools?: Array<string | Record<string, unknown>>
+} {
+  let cleaned = markdown
+  const collected: Array<string | Record<string, unknown>> = []
+  let match: RegExpExecArray | null
+  const re = new RegExp(REQUIRED_TOOLS_BLOCK_RE.source, 'gi')
+
+  while ((match = re.exec(markdown)) !== null) {
+    collected.push(...parseRequiredToolsBlock(match[2] ?? ''))
+  }
+
+  cleaned = cleaned.replace(REQUIRED_TOOLS_BLOCK_RE, '\n').trim()
+  return {
+    cleanedMarkdown: cleaned,
+    requiredTools: collected.length > 0 ? collected : undefined,
+  }
+}
+
 export function parseOperationMarkdown(content: string): ParsedOperation {
   const { data, content: markdown } = matter(content)
   const fm = data as Record<string, unknown>
-  const { intro, steps } = parseSteps(markdown)
+  const operationType = parseOperationType(fm.operation_type)
+  const { cleanedMarkdown, requiredTools } = extractRequiredToolsSection(markdown)
+  const requiredToolEntries = parseRequiredTools(requiredTools)
 
-  const toolsRaw = fm.required_tools
-  const requiredTools = Array.isArray(toolsRaw)
-    ? toolsRaw.map((t) => String(t).trim()).filter(Boolean)
-    : undefined
+  if (operationType === 'checklist') {
+    const { intro, sections, steps } = parseChecklistMarkdown(cleanedMarkdown)
+    return {
+      opId: String(fm.op_id ?? 'OP-UNKNOWN'),
+      title: String(fm.default_title ?? 'Operation'),
+      operationType,
+      estimatedMinutes:
+        typeof fm.estimated_minutes === 'number' ? fm.estimated_minutes : undefined,
+      introMarkdown: intro,
+      requiredTools,
+      requiredToolEntries,
+      steps,
+      checklistSections: sections,
+    }
+  }
+
+  const { intro, steps } = parseSteps(cleanedMarkdown)
 
   return {
     opId: String(fm.op_id ?? 'OP-UNKNOWN'),
     title: String(fm.default_title ?? 'Operation'),
+    operationType,
     estimatedMinutes:
       typeof fm.estimated_minutes === 'number' ? fm.estimated_minutes : undefined,
     introMarkdown: intro,
     requiredTools,
+    requiredToolEntries,
     steps,
   }
 }
@@ -105,5 +189,5 @@ export function parseRoutingTable(markdown: string): import('./types').RoutingRo
     })
   }
 
-  return rows
+  return rows.sort((a, b) => a.operationNo - b.operationNo)
 }

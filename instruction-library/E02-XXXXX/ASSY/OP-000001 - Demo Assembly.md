@@ -1,26 +1,31 @@
 ---
 op_id: OP-000001
+operation_type: instruction
 default_title: Demo Assembly
 estimated_minutes: 15
 schema_version: 1
 ---
 
-# Demo Assembly (OP-000001)
+# Demo Assembly
+
+```required_tools
+- Torque wrench (calibrated)
+- description: Digital caliper
+  part_number: CAL-001
+  equipment_id: EQ-42
+```
 
 Use this operation to verify unit identity, torque critical fasteners, and final visual inspection.
 
 ## Step 1 — Identify unit
 
-Record the unit serial number for this work order. Operator name and shift are set on the home screen.
+Record the unit serial number for this work order. Operator name is set on the home screen.
 
 ```orche-input
 {"id":"serial_number","type":"text","label":"Serial number","required":true}
 ```
 
 ## Step 2 — Torque sequence
-
-> [!warning] Caution
-> Do not proceed if the previous operation left open hardware.
 
 > [!info]
 > Reference diagrams live in this operation’s `.assets` folder. They sync with the instruction library in Git.
@@ -33,10 +38,6 @@ Record the unit serial number for this work order. Operator name and shift are s
 
 > [!example] Sequence
 > Torque order is **A → B → C** as shown in the diagram below.
-
-Reference diagram — SVG schematic:
-
-![Assembly reference diagram](OP-000001%20-%20Demo%20Assembly.assets/assembly-reference.svg)
 
 Example UI screenshot:
 
@@ -83,8 +84,6 @@ Example UI screenshot:
 
 ## Step 4 — Sign off
 
-> [!quote]
-> Quality is built in at every step — not inspected in at the end.
 
 ```orche-input
 {"id":"label_verified","type":"checkbox","label":"Unit label matches serial number","required":true}
